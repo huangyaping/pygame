@@ -35,7 +35,7 @@ LINE = "line"
 SQUARE = "square"
 TBLOCK = "tblock"
 LBLOCK = "lblock"
-ALLSHAPE = (LBLOCK,)
+ALLSHAPE = (LINE, SQUARE, TBLOCK, LBLOCK,)
 ALLFORWARD = (UP, RIGHT, DOWN, LEFT)
 
 def main():
