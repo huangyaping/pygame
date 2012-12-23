@@ -36,7 +36,9 @@ SQUARE = "square"
 TBLOCK = "tblock"
 LBLOCK = "lblock"
 RLBLOCK = "rlblock"
-ALLSHAPE = (LBLOCK, RLBLOCK,)
+SQUIGGLE = "squiggle"
+RSQUIGGLE = "rsquiggle"
+ALLSHAPE = (LINE, SQUARE, TBLOCK, LBLOCK, RLBLOCK, SQUIGGLE, RSQUIGGLE)
 ALLFORWARD = (UP, RIGHT, DOWN, LEFT)
 
 '''
@@ -49,26 +51,66 @@ rules = {
         }
 '''
 RULES = {
+            LINE : (
+                {
+                    UP : ((0,1), (1,1), (2,1), (3,1)),
+                    RIGHT : ((1,0), (1,1), (1,2), (1,3)),
+                    DOWN : ((0,1), (1,1), (2,1), (3,1)),
+                    LEFT : ((1,0), (1,1), (1,2), (1,3)),
+                }
+            ),
+            SQUARE : (
+                {
+                    UP : ((0,0), (1,0), (1,1), (0,1)),
+                    RIGHT : ((0,0), (1,0), (1,1), (0,1)),
+                    DOWN : ((0,0), (1,0), (1,1), (0,1)),
+                    LEFT : ((0,0), (1,0), (1,1), (0,1)),
+                }
+            ),
+            TBLOCK : (
+                {
+                    UP : ((1,0), (1,1), (0,1), (2,1)),
+                    RIGHT : ((2,1), (1,1), (1,0), (1,2)),
+                    DOWN : ((1,2), (1,1), (2,1), (0,1)),
+                    LEFT : ((0,1), (1,1), (1,2), (1,0)),
+                }
+            ),
             LBLOCK : (
                 {
                     UP : ((2,0), (2,1), (1,1), (0,1)),
                     RIGHT : ((2,2), (1,2), (1,1), (1,0)),
                     DOWN : ((0,2), (0,1), (1,1), (2,1)),
-                    LEFT : ((0,0), (1,0), (1,1), (1,2))
+                    LEFT : ((0,0), (1,0), (1,1), (1,2)),
                 }
             ),
             RLBLOCK : (
                 {
-                    UP : ((2,0), (2,1), (1,1), (0,1)),
-                    RIGHT : ((2,2), (1,2), (1,1), (1,0)),
-                    DOWN : ((0,2), (0,1), (1,1), (2,1)),
-                    LEFT : ((0,0), (1,0), (1,1), (1,2))
+                    UP : ((0,0), (0,1), (1,1), (2,1)),
+                    RIGHT : ((2,0), (1,0), (1,1), (1,2)),
+                    DOWN : ((2,2), (2,1), (1,1), (0,1)),
+                    LEFT : ((0,2), (1,2), (1,1), (1,0)),
+                }
+            ),
+            SQUIGGLE : (
+                {
+                    UP : ((1,0), (1,1), (2,1), (2,2)),
+                    RIGHT : ((2,1), (1,1), (1,2), (0,2)),
+                    DOWN : ((1,0), (1,1), (2,1), (2,2)),
+                    LEFT : ((2,1), (1,1), (1,2), (0,2)),
+                }
+            ),
+            RSQUIGGLE : (
+                {
+                    UP : ((1,0), (1,1), (0,1), (0,2)),
+                    RIGHT : ((2,1), (1,1), (1,0), (0,0)),
+                    DOWN : ((1,0), (1,1), (0,1), (0,2)),
+                    LEFT : ((2,1), (1,1), (1,0), (0,0)),
                 }
             ),
         }
 
 def main():
-    global DISPLAYSURF, FPSCLOCK, ISDEAD, FALLOVER
+    global DISPLAYSURF, FPSCLOCK, ISDEAD, FALLSPEED, FALLOVER
     pygame.init()
     DISPLAYSURF = pygame.display.set_mode((WINDOWWIDTH, WINDOWHEIGHT))
     pygame.display.set_caption(CAPTION)
@@ -89,8 +131,10 @@ def main():
                 if event.key in (K_DOWN, K_LEFT, K_RIGHT):
                     direction = dirFromKey(event.key)
                     move(direction)
-                elif event.key == K_SPACE:
+                elif event.key == K_UP:
                     transform()
+                elif event.key == K_SPACE:
+                    FALLEVENT.set()
                 elif ISDEAD and event.key == K_RETURN:
                     initBoard()
                     startGame()
@@ -99,7 +143,7 @@ def main():
 def initBoard():
     # erase all things in the game main board
     # create background with new game state
-    global BOXWIDTH, BOXHEIGHT, ALLBLOCKS, MAINBOARD
+    global BOXWIDTH, BOXHEIGHT, CENTER, ALLBLOCKS, MAINBOARD, FALLEVENT
     DISPLAYSURF.fill(BGCOLOR)
     MAINBOARD = [[0]*BOARDWIDTH for i in range(BOARDHEIGHT)]
     awidth = WINDOWWIDTH - XMARGIN*2
@@ -107,9 +151,11 @@ def initBoard():
     pygame.draw.rect(DISPLAYSURF, BOARDCOLOR, (XMARGIN-1, YMARGIN-3, awidth+1, aheight+1), 1)
     BOXWIDTH = int((awidth + GAPSIZE) / BOARDWIDTH - GAPSIZE)
     BOXHEIGHT = int((aheight + GAPSIZE) / BOARDHEIGHT - GAPSIZE)
+    CENTER = int(BOARDWIDTH / 2)
     ALLBLOCKS = [ (shape, forward) for shape in ALLSHAPE for forward in ALLFORWARD ]
     random.shuffle(ALLBLOCKS)
     drawBoard()
+    FALLEVENT = threading.Event()
 
 def drawBoard():
     "Redraw entire board."
@@ -149,8 +195,9 @@ def clearBlock():
     BLOCK = dict(shape=None, forward=None, coords=[])
     
 def newBlock():
-    global BLOCK, ISDEAD
+    global BLOCK, ISDEAD, FALLSPEED, FALLEVENT
     clearBlock()
+    FALLEVENT = threading.Event()
     shape, forward = random.choice(ALLBLOCKS)
     coords = getCoords(shape, forward)
     for boxx, boxy in coords:
@@ -166,30 +213,29 @@ def newBlock():
 def getCoords(shape, forward):
     coords = RULES[shape][forward]
     #print 'getCoords', shape, forward
-    center = int(BOARDWIDTH / 2)
-    if shape == LBLOCK and forward == DOWN:
+    
+    if shape in (LBLOCK, RLBLOCK) and forward == DOWN:
         coords = do_move(coords, UP)
-    coords = do_move(coords, RIGHT, center-1)
+    coords = do_move(coords, RIGHT, CENTER-1)
     #print 'getcs', coords
     return coords
 
 def fallOff():
     global ISDEAD, FALLOVER
-    time.sleep(FALLSPEED)
+    FALLEVENT.wait(FALLSPEED)
     while True:
         if not move(DOWN):
             clearBlock()
             eliminate()
-            center = int(BOARDWIDTH / 2)
-            if MAINBOARD[0][center]:
+            if MAINBOARD[0][CENTER]:
                 break
             newBlock()
         if ISDEAD:
             break
-        time.sleep(FALLSPEED)
+        FALLEVENT.wait(FALLSPEED)
     gameOver()
+    ISDEAD = True
     FALLOVER = True
-    print 'FALLOVER'
 
 def moveTo(coords, direction):
     " coords - current board coordinates."
@@ -280,7 +326,7 @@ def transform():
             drawBox(boxx, boxy)
         BLOCK['coords'] = newCoords
         BLOCK['forward'] = newForward
-        print BLOCK
+        #print BLOCK
 
 def getNewForward(forward):
     return ALLFORWARD[(forward+1)%len(ALLFORWARD)]
