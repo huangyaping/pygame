@@ -123,7 +123,7 @@ def main():
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
                 ISDEAD = True
-                while not FALLOVER: # wait until the "fall thread" die
+                while not FALLOVER: # wait until the "fall-thread" die
                     pass
                 pygame.quit()
                 sys.exit()
