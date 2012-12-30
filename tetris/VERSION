@@ -1,0 +1,22 @@
+
+basic features:
+    initialize game states
+    have some kind of blocks and four forms
+    block will fall off with a certian speed
+    transform block
+    eliminate the complete line
+
+blankwhite.py:
+    implement the basic features
+
+blankwhite-x.py:
+    reconstruct the representation of block
+    rewrite the algorithm of "transform block", make it more adaptable
+    add to seven kinds of block
+    rename the "form" to "forward"
+
+0.1.py:
+    code optimizations - clear some codes
+    fix the bug of thread synchronization between "main" thread and "fall-off" thread
+    rename the "transform" to "rotate"
+    
