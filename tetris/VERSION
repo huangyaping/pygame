@@ -20,3 +20,6 @@ blankwhite-x.py:
     fix the bug of thread synchronization between "main" thread and "fall-off" thread
     rename the "transform" to "rotate"
 
+0.2.py:
+    add "score" feature
+
