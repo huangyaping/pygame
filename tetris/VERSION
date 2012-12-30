@@ -19,4 +19,4 @@ blankwhite-x.py:
     code optimizations - clear some codes
     fix the bug of thread synchronization between "main" thread and "fall-off" thread
     rename the "transform" to "rotate"
-    
+
