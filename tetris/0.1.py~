@@ -1,0 +1,436 @@
+#!/usr/bin/env python
+import pygame, sys, threading, time, random
+from pygame.locals import *
+
+FPS = 30 # frames per second, the general speed of the program
+
+CAPTION = 'Tetris - 0.1'
+WINDOWWIDTH = 300
+WINDOWHEIGHT = 450
+BOARDWIDTH = 10
+BOARDHEIGHT = 15
+XMARGIN = 5
+YMARGIN = 5
+GAPSIZE = 1
+FALLSPEED = 1
+
+WHITE = (255, 255, 255)
+LIGHTGRAY = (241, 241, 241)
+GRAY = (100, 100, 100)
+LIGHTGREEN = (170, 238, 187)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+
+BGCOLOR = WHITE
+BGBOXCOLOR = LIGHTGRAY
+BOARDCOLOR = BLACK
+BOXCOLOR = LIGHTGREEN
+
+UP = 0
+RIGHT = 1
+DOWN = 2
+LEFT = 3
+
+LINE = "line"
+SQUARE = "square"
+TBLOCK = "tblock"
+LBLOCK = "lblock"
+RLBLOCK = "rlblock"
+SQUIGGLE = "squiggle"
+RSQUIGGLE = "rsquiggle"
+ALLSHAPE = (LINE, SQUARE, TBLOCK, LBLOCK, RLBLOCK, SQUIGGLE, RSQUIGGLE)
+ALLFORWARD = (UP, RIGHT, DOWN, LEFT)
+#ALLSHAPE = (RLBLOCK,)
+
+'''
+rules = {
+            block type : (
+                {
+                    forward : ((x, y) - board coordinates of every point in order of this block),
+                }
+            ),
+        }
+'''
+RULES = {
+            LINE : (
+                {
+                    UP : ((0,1), (1,1), (2,1), (3,1)),
+                    RIGHT : ((1,0), (1,1), (1,2), (1,3)),
+                    DOWN : ((0,1), (1,1), (2,1), (3,1)),
+                    LEFT : ((1,0), (1,1), (1,2), (1,3)),
+                }
+            ),
+            SQUARE : (
+                {
+                    UP : ((0,0), (1,0), (1,1), (0,1)),
+                    RIGHT : ((0,0), (1,0), (1,1), (0,1)),
+                    DOWN : ((0,0), (1,0), (1,1), (0,1)),
+                    LEFT : ((0,0), (1,0), (1,1), (0,1)),
+                }
+            ),
+            TBLOCK : (
+                {
+                    UP : ((1,0), (1,1), (0,1), (2,1)),
+                    RIGHT : ((2,1), (1,1), (1,0), (1,2)),
+                    DOWN : ((1,2), (1,1), (2,1), (0,1)),
+                    LEFT : ((0,1), (1,1), (1,2), (1,0)),
+                }
+            ),
+            LBLOCK : (
+                {
+                    UP : ((2,0), (2,1), (1,1), (0,1)),
+                    RIGHT : ((2,2), (1,2), (1,1), (1,0)),
+                    DOWN : ((0,2), (0,1), (1,1), (2,1)),
+                    LEFT : ((0,0), (1,0), (1,1), (1,2)),
+                }
+            ),
+            RLBLOCK : (
+                {
+                    UP : ((0,0), (0,1), (1,1), (2,1)),
+                    RIGHT : ((2,0), (1,0), (1,1), (1,2)),
+                    DOWN : ((2,2), (2,1), (1,1), (0,1)),
+                    LEFT : ((0,2), (1,2), (1,1), (1,0)),
+                }
+            ),
+            SQUIGGLE : (
+                {
+                    UP : ((1,0), (1,1), (2,1), (2,2)),
+                    RIGHT : ((2,0), (1,0), (1,1), (0,1)),
+                    DOWN : ((1,0), (1,1), (2,1), (2,2)),
+                    LEFT : ((2,0), (1,0), (1,1), (0,1)),
+                }
+            ),
+            RSQUIGGLE : (
+                {
+                    UP : ((1,0), (1,1), (0,1), (0,2)),
+                    RIGHT : ((2,1), (1,1), (1,0), (0,0)),
+                    DOWN : ((1,0), (1,1), (0,1), (0,2)),
+                    LEFT : ((2,1), (1,1), (1,0), (0,0)),
+                }
+            ),
+        }
+
+def main():
+    global DISPLAYSURF, FPSCLOCK, GAMEOVER, FALLOVER
+    pygame.init()
+    DISPLAYSURF = pygame.display.set_mode((WINDOWWIDTH, WINDOWHEIGHT))
+    pygame.display.set_caption(CAPTION)
+    
+    FPSCLOCK = pygame.time.Clock()
+    initGame()
+    startGame()
+    
+    while True:
+        for event in pygame.event.get():
+            if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
+                GAMEOVER = True
+                while not FALLOVER: # until the "fall-thread" is dead
+                    pass
+                pygame.quit()
+                sys.exit()
+            elif event.type == KEYUP:
+                if GAMEOVER:
+                    if event.key == K_RETURN:
+                        initGame()
+                        startGame()
+                elif event.key in (K_DOWN, K_LEFT, K_RIGHT):
+                    direction = dirFromKey(event.key)
+                    move(direction)
+                elif event.key == K_UP:
+                    rotate()
+                elif event.key == K_SPACE:
+                    FALLEVENT.set() # fall the block straight with no waiting
+        pygame.display.update()
+
+def initGame():
+    '''
+    Erase all things of the game.
+    Initialize game states.
+    '''
+    global BOXWIDTH, BOXHEIGHT, CENTER, ALLBLOCKS, MAINBOARD, FALLEVENT, LOCK
+    DISPLAYSURF.fill(BGCOLOR)
+    MAINBOARD = [[0]*BOARDWIDTH for i in range(BOARDHEIGHT)]
+    awidth = WINDOWWIDTH - XMARGIN*2
+    aheight = WINDOWHEIGHT - YMARGIN*2
+    pygame.draw.rect(DISPLAYSURF, BOARDCOLOR, (XMARGIN-1, YMARGIN-3, awidth+1, aheight+1), 1)
+    BOXWIDTH = int((awidth + GAPSIZE) / BOARDWIDTH - GAPSIZE)
+    BOXHEIGHT = int((aheight + GAPSIZE) / BOARDHEIGHT - GAPSIZE)
+    CENTER = int(BOARDWIDTH / 2)
+    ALLBLOCKS = [ (shape, forward) for shape in ALLSHAPE for forward in ALLFORWARD ]
+    random.shuffle(ALLBLOCKS)
+    drawBoard()
+    FALLEVENT = threading.Event()
+    LOCK = threading.RLock()
+
+def drawBoard():
+    "Redraw the entire board."
+    for boxy in range(BOARDHEIGHT):
+        for boxx in range(BOARDWIDTH):
+            drawBox(boxx, boxy)
+
+def drawBox(boxx, boxy):
+    color = BGBOXCOLOR
+    if MAINBOARD[boxy][boxx]:
+        color = BOXCOLOR
+    left, top = leftTopCoordsOfBox(boxx, boxy)
+    pygame.draw.rect(DISPLAYSURF, color, (left, top, BOXWIDTH, BOXHEIGHT))
+
+def drawBlock(coords, color):
+    for boxx, boxy in coords:
+        drawBox(boxx, boxy, color)
+
+def leftTopCoordsOfBox(boxx, boxy):
+    left = boxx * (BOXWIDTH+GAPSIZE) + XMARGIN
+    top = boxy * (BOXHEIGHT+GAPSIZE) + YMARGIN
+    return (left, top)
+
+def startGame():
+    # start the process for the fall-off block
+    global GAMEOVER, FALLOVER
+    GAMEOVER = False
+    FALLOVER = False
+    newBlock()
+    FALL = threading.Thread(target=fallOff)
+    FALL.daemon = True
+    FALL.start()
+    
+def clearBlock():
+    "Empty current state."
+    global BLOCK
+    BLOCK = dict(shape=None, forward=None, coords=[])
+    
+def newBlock():
+    global BLOCK, GAMEOVER, FALLEVENT
+    clearBlock()
+    FALLEVENT = threading.Event()
+    shape, forward = random.choice(ALLBLOCKS)
+    coords = getCoords(shape, forward)
+    for boxx, boxy in coords:
+        if MAINBOARD[boxy][boxx]:
+            GAMEOVER = True
+        else:
+            MAINBOARD[boxy][boxx] = 1
+            drawBox(boxx, boxy)
+    if GAMEOVER:
+        print shape, forward
+        return
+    BLOCK = dict(shape=shape, forward=forward, coords=coords)
+    #print BLOCK
+
+def getCoords(shape, forward):
+    coords = RULES[shape][forward]
+    print 'getCoords', shape, forward, coords
+    coords = do_move(coords, RIGHT, CENTER-1) # move to the center of board
+    ad = dirFromAdjust(shape, forward) # direction which the block be adjusted
+    print ad
+    if ad != None:
+        coords = do_move(coords, ad)
+    print 'getcs', shape, forward, coords
+    return coords
+
+def dirFromAdjust(shape, forward):
+    if shape == LINE and forward in (UP, DOWN):
+        return UP
+    if shape == SQUIGGLE and forward in (UP, DOWN):
+        return LEFT
+    if shape in (LBLOCK, RLBLOCK, TBLOCK):
+        if forward == DOWN:
+            return UP
+        elif forward == RIGHT:
+            return LEFT
+    
+
+def fallOff():
+    global FALLSPEED, GAMEOVER, FALLOVER
+    FALLEVENT.wait(FALLSPEED)
+    while True:
+        if not move(DOWN):
+            clearBlock()
+            eliminate()
+            if MAINBOARD[0][CENTER]:
+                print 'top traffic'
+                break
+            newBlock()
+        if GAMEOVER:
+            print 'new traffic'
+            break
+        FALLEVENT.wait(FALLSPEED)
+    gameOver()
+    GAMEOVER = True
+    FALLOVER = True
+
+def move(direction):
+    # move in the 'direction'
+    with LOCK:
+        #print lock, threading.current_thread()
+        oldCoords = BLOCK['coords']
+        newCoords = do_move(oldCoords, direction)
+        newCoords = checkBounds(oldCoords, newCoords)
+        if newCoords:
+            for boxx, boxy in oldCoords:
+                MAINBOARD[boxy][boxx] = 0
+                drawBox(boxx, boxy)
+            for boxx, boxy in newCoords:
+                MAINBOARD[boxy][boxx] = 1
+                drawBox(boxx, boxy)
+            BLOCK['coords'] = newCoords
+        #print '-'*10+'over'+'-'*10
+        return newCoords
+
+def do_move(oldCoords, direction, step=1):
+    '''
+    oldCoords - the current board coordinates of the block
+    direction - (DOWN, LEFT, RIGHT, UP)
+    step - how much steps(boxes) to move
+    Return the coordinates after moving.
+    '''
+    newCoords = []
+    if direction == DOWN:
+        for boxx, boxy in oldCoords:
+            newCoords.append((boxx, boxy+step))
+    elif direction == LEFT:
+        for boxx, boxy in oldCoords:
+            newCoords.append((boxx-step, boxy))
+    elif direction == RIGHT:
+        for boxx, boxy in oldCoords:
+            newCoords.append((boxx+step, boxy))
+    elif direction == UP:
+        for boxx, boxy in oldCoords:
+            newCoords.append((boxx, boxy-step))
+    '''
+    print 'do move'
+    print oldCoords
+    print newCoords
+    print 'over'
+    '''
+    if not newCoords:
+        newCoords = oldCoords
+    return newCoords
+            
+def checkBounds(oldCoords, newCoords):
+    for boxx, boxy in newCoords:
+        if boxx < 0 or boxy < 0 or boxx >= BOARDWIDTH or boxy >= BOARDHEIGHT:
+            return None
+    for box in newCoords:
+        if box not in oldCoords and MAINBOARD[box[1]][box[0]]:
+            return None
+    return newCoords
+    
+def rotate():
+    "Rotate the block."
+    with LOCK:
+        shape, forward = getShapeAndForward()
+        oldCoords = BLOCK['coords']
+        #if not oldCoords:
+        #    return
+        adjust = []
+        newForward = getNewForward(forward)
+        nf = RULES[shape][newForward]
+        for i in range(len(RULES[shape][newForward])):
+            adjust.append(( RULES[shape][newForward][i][0] - RULES[shape][forward][i][0],
+                        RULES[shape][newForward][i][1] - RULES[shape][forward][i][1] ))
+
+        newCoords = []
+        for (boxx, boxy), (ax, ay) in zip(oldCoords, adjust):
+            newCoords.append( (boxx + ax, boxy + ay) )
+                
+        if not checkBounds(oldCoords, newCoords):
+            return None
+        # erase old block, draw new block
+        for boxx, boxy in oldCoords:
+            MAINBOARD[boxy][boxx] = 0
+            drawBox(boxx, boxy)
+        for boxx, boxy in newCoords:
+            MAINBOARD[boxy][boxx] = 1
+            drawBox(boxx, boxy)
+        BLOCK['coords'] = newCoords
+        BLOCK['forward'] = newForward
+        #print BLOCK
+
+def getNewForward(forward):
+    return ALLFORWARD[(forward+1)%len(ALLFORWARD)]
+
+def eliminate():
+    lines = getEliminations()
+    if not lines:
+        return
+    flash = 3
+    for i in range(flash):
+        for line in lines:
+            for boxx in range(BOARDWIDTH):
+                MAINBOARD[line][boxx] = 1
+                drawBox(boxx, line)
+        pygame.display.update()
+        time.sleep(0.1)
+        FPSCLOCK.tick(FPS)
+        for line in lines:
+            for boxx in range(BOARDWIDTH):
+                MAINBOARD[line][boxx] = 0
+                drawBox(boxx, line)
+        pygame.display.update()
+        time.sleep(0.1)
+        FPSCLOCK.tick(FPS)
+    for line in lines:
+        del MAINBOARD[line]
+    for line in lines:
+        MAINBOARD.insert(0, [0]*BOARDWIDTH)
+    drawBoard()
+
+def getEliminations():
+    '''
+    Return those line number which is complete.
+    Each line number has range(0, "BOARDHEIGHT").
+    '''
+    pboard()
+    es = []
+    for boxy in range(BOARDHEIGHT-1, -1, -1):
+        for boxx in range(BOARDWIDTH-1, -1, -1):
+            if MAINBOARD[boxy][boxx] == 0:
+                break
+        else:
+            es.append(boxy)
+    return es
+
+def gameOver():
+    fontObj = pygame.font.Font('freesansbold.ttf', 32)
+    textSurfaceObj = fontObj.render('Game Over!', True, RED)
+    textRectObj = textSurfaceObj.get_rect()
+    textRectObj.center = (WINDOWWIDTH/2, WINDOWHEIGHT/2-16)
+    DISPLAYSURF.blit(textSurfaceObj, textRectObj)
+    
+    fontObj = pygame.font.Font('freesansbold.ttf', 16)
+    textSurfaceObj = fontObj.render('Press Enter to replay game', True, BLACK)
+    textRectObj = textSurfaceObj.get_rect()
+    textRectObj.center = (WINDOWWIDTH/2, WINDOWHEIGHT/2+16)
+    DISPLAYSURF.blit(textSurfaceObj, textRectObj)
+
+def getShapeAndForward():
+    return BLOCK['shape'], BLOCK['forward']
+
+def dirFromKey(key_val):
+    "Return corresponding direction from keyboard constants."
+    if key_val == K_DOWN:
+        return DOWN
+    elif key_val == K_LEFT:
+        return LEFT
+    elif key_val == K_RIGHT:
+        return RIGHT
+
+def pboard():
+    '''   
+    for b in MAINBOARD:
+        print b
+    print
+    '''
+
+def moveTo(oldCoords, direction):
+    '''
+    oldCoords - the board coordinates of the block
+    Move and return the destination coordinates.
+    '''
+    newCoords = do_move(oldCoords, direction)
+    return checkBounds(oldCoords, newCoords)
+
+if __name__ == "__main__":
+    main()
