@@ -41,6 +41,7 @@ SQUIGGLE = "squiggle"
 RSQUIGGLE = "rsquiggle"
 ALLSHAPE = (LINE, SQUARE, TBLOCK, LBLOCK, RLBLOCK, SQUIGGLE, RSQUIGGLE)
 ALLFORWARD = (UP, RIGHT, DOWN, LEFT)
+#ALLSHAPE = (RLBLOCK,)
 
 '''
 rules = {
@@ -111,39 +112,42 @@ RULES = {
         }
 
 def main():
-    global DISPLAYSURF, FPSCLOCK, ISDEAD, FALLOVER
+    global DISPLAYSURF, FPSCLOCK, GAMEOVER, FALLOVER
     pygame.init()
     DISPLAYSURF = pygame.display.set_mode((WINDOWWIDTH, WINDOWHEIGHT))
     pygame.display.set_caption(CAPTION)
     
     FPSCLOCK = pygame.time.Clock()
-    initBoard()
+    initGame()
     startGame()
     
     while True:
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
-                ISDEAD = True
-                while not FALLOVER: # wait until the "fall-thread" die
+                GAMEOVER = True
+                while not FALLOVER: # until the "fall-thread" is dead
                     pass
                 pygame.quit()
                 sys.exit()
             elif event.type == KEYUP:
-                if event.key in (K_DOWN, K_LEFT, K_RIGHT):
+                if GAMEOVER:
+                    if event.key == K_RETURN:
+                        initGame()
+                        startGame()
+                elif event.key in (K_DOWN, K_LEFT, K_RIGHT):
                     direction = dirFromKey(event.key)
                     move(direction)
                 elif event.key == K_UP:
-                    transform()
+                    rotate()
                 elif event.key == K_SPACE:
-                    FALLEVENT.set()
-                elif ISDEAD and event.key == K_RETURN:
-                    initBoard()
-                    startGame()
+                    FALLEVENT.set() # fall the block straight with no waiting
         pygame.display.update()
 
-def initBoard():
-    # erase all things in the game main board
-    # create background with new game state
+def initGame():
+    '''
+    Erase all things of the game.
+    Initialize game states.
+    '''
     global BOXWIDTH, BOXHEIGHT, CENTER, ALLBLOCKS, MAINBOARD, FALLEVENT, LOCK
     DISPLAYSURF.fill(BGCOLOR)
     MAINBOARD = [[0]*BOARDWIDTH for i in range(BOARDHEIGHT)]
@@ -160,7 +164,7 @@ def initBoard():
     LOCK = threading.RLock()
 
 def drawBoard():
-    "Redraw entire board."
+    "Redraw the entire board."
     for boxy in range(BOARDHEIGHT):
         for boxx in range(BOARDWIDTH):
             drawBox(boxx, boxy)
@@ -183,8 +187,8 @@ def leftTopCoordsOfBox(boxx, boxy):
 
 def startGame():
     # start the process for the fall-off block
-    global ISDEAD, FALLOVER
-    ISDEAD = False
+    global GAMEOVER, FALLOVER
+    GAMEOVER = False
     FALLOVER = False
     newBlock()
     FALL = threading.Thread(target=fallOff)
@@ -197,18 +201,18 @@ def clearBlock():
     BLOCK = dict(shape=None, forward=None, coords=[])
     
 def newBlock():
-    global BLOCK, ISDEAD, FALLEVENT
+    global BLOCK, GAMEOVER, FALLEVENT
     clearBlock()
     FALLEVENT = threading.Event()
     shape, forward = random.choice(ALLBLOCKS)
     coords = getCoords(shape, forward)
     for boxx, boxy in coords:
         if MAINBOARD[boxy][boxx]:
-            ISDEAD = True
+            GAMEOVER = True
         else:
             MAINBOARD[boxy][boxx] = 1
             drawBox(boxx, boxy)
-    if ISDEAD:
+    if GAMEOVER:
         print shape, forward
         return
     BLOCK = dict(shape=shape, forward=forward, coords=coords)
@@ -216,16 +220,32 @@ def newBlock():
 
 def getCoords(shape, forward):
     coords = RULES[shape][forward]
-    #print 'getCoords', shape, forward
-    
-    if shape in (LBLOCK, RLBLOCK) and forward == DOWN: # adjust the position
-        coords = do_move(coords, UP)
-    coords = do_move(coords, RIGHT, CENTER-1)
-    #print 'getcs', coords
+    print 'getCoords', shape, forward, coords
+    coords = do_move(coords, RIGHT, CENTER-1) # move to the center of board
+    ad = dirFromAdjust(shape, forward) # direction which the block be adjusted
+    #print ad
+    if ad != None:
+        coords = do_move(coords, ad)
+    print 'getcs', shape, forward, coords
     return coords
 
+def dirFromAdjust(shape, forward):
+    if shape == LINE:
+        if forward in (UP, DOWN):
+            return UP
+        else:
+            return LEFT
+    if shape == SQUIGGLE and forward in (UP, DOWN):
+        return LEFT
+    if shape in (LBLOCK, RLBLOCK, TBLOCK):
+        if forward == DOWN:
+            return UP
+        elif forward == RIGHT:
+            return LEFT
+    
+
 def fallOff():
-    global FALLSPEED, ISDEAD, FALLOVER
+    global FALLSPEED, GAMEOVER, FALLOVER
     FALLEVENT.wait(FALLSPEED)
     while True:
         if not move(DOWN):
@@ -235,17 +255,16 @@ def fallOff():
                 print 'top traffic'
                 break
             newBlock()
-        if ISDEAD:
+        if GAMEOVER:
             print 'new traffic'
             break
         FALLEVENT.wait(FALLSPEED)
     gameOver()
-    ISDEAD = True
+    GAMEOVER = True
     FALLOVER = True
 
 def move(direction):
     # move in the 'direction'
-    
     with LOCK:
         #print lock, threading.current_thread()
         oldCoords = BLOCK['coords']
@@ -288,6 +307,8 @@ def do_move(oldCoords, direction, step=1):
     print newCoords
     print 'over'
     '''
+    if not newCoords:
+        newCoords = oldCoords
     return newCoords
             
 def checkBounds(oldCoords, newCoords):
@@ -299,8 +320,8 @@ def checkBounds(oldCoords, newCoords):
             return None
     return newCoords
     
-def transform():
-    # transform
+def rotate():
+    "Rotate the block."
     with LOCK:
         shape, forward = getShapeAndForward()
         oldCoords = BLOCK['coords']
