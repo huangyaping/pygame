@@ -21,5 +21,6 @@ blankwhite-x.py:
     rename the "transform" to "rotate"
 
 0.2.py:
+    pause game
     add "score" feature
 
