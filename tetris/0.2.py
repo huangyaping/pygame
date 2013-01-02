@@ -166,7 +166,7 @@ def initGame():
     Erase all things of the game.
     Initialize game states.
     '''
-    global BOXWIDTH, BOXHEIGHT, CENTER, ALLBLOCKS, MAINBOARD, FALLEVENT, LOCK, GAMESTATE, SCORES
+    global BOXWIDTH, BOXHEIGHT, CENTER, ALLBLOCKS, MAINBOARD, FALLEVENT, LOCK, GAMESTATE, SCORES, NEXTBLOCK
     DISPLAYSURF.fill(BGCOLOR)
     MAINBOARD = [[0]*BOARDWIDTH for i in range(BOARDHEIGHT)]
     awidth = WINDOWWIDTH - XMARGIN*2
@@ -183,6 +183,7 @@ def initGame():
     GAMESTATE = INIT
     SCORES = 0
     drawScores()
+    NEXTBLOCK = newBlock()
 
 def drawBoard():
     "Redraw the entire board."
@@ -197,9 +198,19 @@ def drawBox(boxx, boxy):
     left, top = leftTopCoordsOfBox(boxx, boxy)
     pygame.draw.rect(DISPLAYSURF, color, (left, top, BOXWIDTH, BOXHEIGHT))
 
-def drawBlock(coords, color):
+def drawNextBlock():
+    global BLOCK, NEXTBLOCK
+    coords = BLOCK["coords"]
+    nextCoords = NEXTBLOCK["coords"]
+    start_point = (WINDOWWIDTH+1, WINDOWHEIGHT/4)
     for boxx, boxy in coords:
-        drawBox(boxx, boxy, color)
+        left = boxx * (BOXWIDTH+GAPSIZE) + XMARGIN
+        top = boxy * (BOXHEIGHT+GAPSIZE) + YMARGIN
+        pygame.draw.rect(DISPLAYSURF, PANELCOLOR, (start_point[0]+left, start_point[1]+top, BOXWIDTH, BOXHEIGHT))
+    for boxx, boxy in nextCoords:
+        left = boxx * (BOXWIDTH+GAPSIZE) + XMARGIN
+        top = boxy * (BOXHEIGHT+GAPSIZE) + YMARGIN
+        pygame.draw.rect(DISPLAYSURF, BOXCOLOR, (start_point[0]+left, start_point[1]+top, BOXWIDTH, BOXHEIGHT))
 
 def leftTopCoordsOfBox(boxx, boxy):
     left = boxx * (BOXWIDTH+GAPSIZE) + XMARGIN
@@ -208,9 +219,10 @@ def leftTopCoordsOfBox(boxx, boxy):
 
 def startGame():
     # start the process for the fall-off block
-    global FALLOVER, GAMESTATE
+    global FALLOVER, GAMESTATE, BLOCK
     FALLOVER = False
-    newBlock()
+    nextBlock()
+    moveToBoard()
     FALL = threading.Thread(target=fallOff)
     FALL.daemon = True
     FALL.start()
@@ -221,13 +233,29 @@ def clearBlock():
     global BLOCK
     BLOCK = dict(shape=None, forward=None, coords=[])
     
-def newBlock():
-    global BLOCK, FALLEVENT, GAMESTATE
-    clearBlock()
+def nextBlock():
+    global BLOCK, NEXTBLOCK, FALLEVENT, GAMESTATE
     FALLEVENT = threading.Event()
+    BLOCK, NEXTBLOCK = NEXTBLOCK, newBlock()
+    drawNextBlock()
+    #print BLOCK
+    
+def newBlock():
     shape, forward = random.choice(ALLBLOCKS)
-    coords = getCoords(shape, forward)
-    for boxx, boxy in coords:
+    coords = RULES[shape][forward]
+    return dict(shape=shape, forward=forward, coords=coords)
+
+def moveToBoard():
+    global BLOCK, GAMESTATE
+    shape, forward = getShapeAndForward()
+    oldCoords = BLOCK['coords']
+    newCoords = do_move(oldCoords, RIGHT, CENTER-1) # move to the center of board
+    ad = dirFromAdjust(shape, forward) # direction which the block be adjusted
+    #print ad
+    if ad != None:
+        newCoords = do_move(newCoords, ad)
+    print 'moveToBoard', shape, forward, newCoords
+    for boxx, boxy in newCoords:
         if MAINBOARD[boxy][boxx]:
             GAMESTATE = GAMEOVER
         else:
@@ -235,20 +263,9 @@ def newBlock():
             drawBox(boxx, boxy)
     if GAMESTATE == GAMEOVER:
         print shape, forward
-        return
-    BLOCK = dict(shape=shape, forward=forward, coords=coords)
-    #print BLOCK
-
-def getCoords(shape, forward):
-    coords = RULES[shape][forward]
-    print 'getCoords', shape, forward, coords
-    coords = do_move(coords, RIGHT, CENTER-1) # move to the center of board
-    ad = dirFromAdjust(shape, forward) # direction which the block be adjusted
-    #print ad
-    if ad != None:
-        coords = do_move(coords, ad)
-    print 'getcs', shape, forward, coords
-    return coords
+        return None
+    BLOCK['coords'] = newCoords
+    return newCoords
 
 def dirFromAdjust(shape, forward):
     if shape == LINE:
@@ -266,19 +283,20 @@ def dirFromAdjust(shape, forward):
     
 
 def fallOff():
-    global FALLSPEED, FALLOVER, GAMESTATE
+    global FALLSPEED, FALLOVER, GAMESTATE, BLOCK
     FALLEVENT.wait(FALLSPEED)
     while True:
         if GAMESTATE == RUNNING:
             if not move(DOWN):
-                clearBlock()
+                BLOCK = dict(shape=None, forward=None, coords=[]) # empty current state
                 eliminate()
                 if MAINBOARD[0][CENTER]:
                     print 'top traffic'
                     break
-                newBlock()
-            if GAMESTATE == GAMEOVER:
-                break
+                nextBlock()
+                if not moveToBoard():
+                    BLOCK = dict(shape=None, forward=None, coords=[]) # traffic occurs at new block
+                    break
             FALLEVENT.wait(FALLSPEED)
         elif GAMESTATE == PAUSE:
             pass
@@ -440,13 +458,13 @@ def drawScores():
     fontObj = pygame.font.Font('freesansbold.ttf', 32)
     textSurfaceObj = fontObj.render(str(SCORES), True, BLACK)
     textRectObj = textSurfaceObj.get_rect()
-    textRectObj.center = (WINDOWWIDTH+(PANELWIDTH)/2, WINDOWHEIGHT/2)
+    textRectObj.center = (WINDOWWIDTH+(PANELWIDTH)/2, WINDOWHEIGHT-WINDOWHEIGHT/4)
     pygame.draw.rect(DISPLAYSURF, PANELCOLOR, textRectObj)
     
     fontObj = pygame.font.Font('freesansbold.ttf', 32)
     textSurfaceObj = fontObj.render(str(SCORES), True, BLACK)
     textRectObj = textSurfaceObj.get_rect()
-    textRectObj.center = (WINDOWWIDTH+(PANELWIDTH)/2, WINDOWHEIGHT/2)
+    textRectObj.center = (WINDOWWIDTH+(PANELWIDTH)/2, WINDOWHEIGHT-WINDOWHEIGHT/4)
     DISPLAYSURF.blit(textSurfaceObj, textRectObj)
 
 def getShapeAndForward():
