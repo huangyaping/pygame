@@ -16,11 +16,16 @@ blankwhite-x.py:
     rename the "form" to "forward"
 
 0.1.py:
-    code optimizations - clear some codes
+    sort out some codes
     fix the bug of thread synchronization between "main" thread and "fall-off" thread
     rename the "transform" to "rotate"
 
 0.2.py:
     pause game
-    add "score" feature
+    score
+    preview of next block
+
+0.3.py:
+    improve how to die
+    add 'drawFont' function
 
